@@ -1,6 +1,7 @@
 import type { RealtimeVoiceAdapter } from '@assistant-ui/react';
 import { audioEngineInstance } from './audioEngine';
 import { speechServiceInstance } from './speechService';
+import { ttsClient } from './ttsClient';
 import { generateAIResponse } from './aiResponses';
 
 export class AriaRealtimeVoiceAdapter implements RealtimeVoiceAdapter {
@@ -47,7 +48,7 @@ export class AriaRealtimeVoiceAdapter implements RealtimeVoiceAdapter {
               const res = generateAIResponse(text);
               notifyTranscript({ role: 'assistant', text: res.replyText, isFinal: true });
 
-              speechServiceInstance.speak(
+              ttsClient.speak(
                 res.replyText,
                 () => notifyMode('speaking'),
                 () => notifyMode('listening')
@@ -82,9 +83,10 @@ export class AriaRealtimeVoiceAdapter implements RealtimeVoiceAdapter {
         clearInterval(volumeInterval);
         volumeInterval = null;
       }
-      audioEngineInstance.stopMicrophone();
+       audioEngineInstance.stopMicrophone();
       speechServiceInstance.stopListening();
       speechServiceInstance.stopSpeaking();
+      ttsClient.stop();
       notifyStatus({ type: 'ended', reason: 'finished' });
     };
 
@@ -98,7 +100,7 @@ export class AriaRealtimeVoiceAdapter implements RealtimeVoiceAdapter {
       disconnect: disconnectSession,
       mute: () => {
         isMuted = true;
-        audioEngineInstance.stopMicrophone();
+      audioEngineInstance.stopMicrophone();
         speechServiceInstance.stopListening();
       },
       unmute: () => {

@@ -3,6 +3,7 @@ import type { AssistantSettings } from './types';
 import { COLOR_THEMES } from './lib/colorThemes';
 import { audioEngineInstance } from './lib/audioEngine';
 import { speechServiceInstance } from './lib/speechService';
+import { ttsClient } from './lib/ttsClient';
 import { generateAIResponse } from './lib/aiResponses';
 import { useAssistantUiVoice } from './hooks/useAssistantUiVoice';
 import { useAudioAnalyzer } from './hooks/useAudioAnalyzer';
@@ -15,6 +16,7 @@ import { TranscriptView } from './components/TranscriptView';
 import { VoiceControls } from './components/VoiceControls';
 import { TextInputModal } from './components/TextInputModal';
 import { SettingsModal } from './components/SettingsModal';
+import { DefaultTTSBridge } from './lib/defaultTtsBridge';
 
 export default function App() {
   const {
@@ -35,6 +37,7 @@ export default function App() {
   const [isSoundMuted, setIsSoundMuted] = useState(false);
   const [isTextInputOpen, setIsTextInputOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [backendAvailable, setBackendAvailable] = useState(false);
 
   const [settings, setSettings] = useState<AssistantSettings>({
     theme: 'cyber',
@@ -45,7 +48,14 @@ export default function App() {
     speechSynthesis: true,
     sensitivity: 1.0,
     userName: 'Alex',
+    ttsProvider: 'f5tts',
+    referenceVoice: null,
   });
+
+  // Check F5-TTS backend availability on mount
+  useEffect(() => {
+    ttsClient.checkBackend().then((ok) => setBackendAvailable(ok));
+  }, []);
 
   const theme = useMemo(() => COLOR_THEMES[settings.theme] || COLOR_THEMES.cyber, [settings.theme]);
 
@@ -61,7 +71,7 @@ export default function App() {
         setState('speaking');
         audioEngineInstance.playSoundFx('response');
 
-        speechServiceInstance.speak(
+        ttsClient.speak(
           result.replyText,
           () => {},
           () => {
@@ -88,6 +98,7 @@ export default function App() {
       const next = !prev;
       audioEngineInstance.setSoundEffects(!next);
       speechServiceInstance.setSpeechSynthesis(!next);
+      ttsClient.setMuted(next);
       return next;
     });
   }, []);
@@ -101,6 +112,12 @@ export default function App() {
       }
       if (newSettings.speechSynthesis !== undefined) {
         speechServiceInstance.setSpeechSynthesis(newSettings.speechSynthesis);
+      }
+      if (newSettings.ttsProvider !== undefined) {
+        ttsClient.setProvider(newSettings.ttsProvider);
+      }
+      if (newSettings.referenceVoice !== undefined) {
+        ttsClient.setReference(newSettings.referenceVoice);
       }
       return updated;
     });
@@ -135,6 +152,7 @@ export default function App() {
 
   return (
     <main className="relative w-screen h-screen overflow-hidden bg-[#05070d] text-white flex flex-col justify-between font-jakarta selection:bg-cyan-500/30 select-none">
+      <DefaultTTSBridge />
       {/* Header Bar */}
       <Header
         userName={settings.userName}
@@ -195,6 +213,7 @@ export default function App() {
       <SettingsModal
         isOpen={isSettingsOpen}
         settings={settings}
+        backendAvailable={backendAvailable}
         onClose={() => setIsSettingsOpen(false)}
         onUpdateSettings={handleUpdateSettings}
       />

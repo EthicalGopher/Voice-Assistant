@@ -1,10 +1,12 @@
-import { X, Palette, Volume2, Sparkles, User, Sliders } from 'lucide-react';
+import { X, Palette, Volume2, Sparkles, User, Sliders, Speaker, Mic } from 'lucide-react';
 import type { AssistantSettings, ColorThemeKey } from '../types';
 import { COLOR_THEMES } from '../lib/colorThemes';
+import { VoiceReferenceCapture } from './VoiceReferenceCapture';
 
 interface SettingsModalProps {
   isOpen: boolean;
   settings: AssistantSettings;
+  backendAvailable: boolean;
   onClose: () => void;
   onUpdateSettings: (newSettings: Partial<AssistantSettings>) => void;
 }
@@ -12,6 +14,7 @@ interface SettingsModalProps {
 export function SettingsModal({
   isOpen,
   settings,
+  backendAvailable,
   onClose,
   onUpdateSettings,
 }: SettingsModalProps) {
@@ -163,6 +166,64 @@ export function SettingsModal({
                 className="w-4 h-4 accent-cyan-400 cursor-pointer"
               />
             </div>
+          </div>
+
+          {/* TTS Engine Selector */}
+          <div className="space-y-3 pt-2 border-t border-white/10">
+            <label className="flex items-center gap-2 text-xs font-mono tracking-wider text-slate-400 uppercase">
+              <Speaker className="w-3.5 h-3.5 text-cyan-400" />
+              Speech Output Engine
+            </label>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => onUpdateSettings({ ttsProvider: 'f5tts' })}
+                disabled={!backendAvailable}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium transition-all ${
+                  settings.ttsProvider === 'f5tts'
+                    ? 'bg-cyan-500/20 border border-cyan-400 text-cyan-200 shadow-lg shadow-cyan-500/20'
+                    : 'bg-white/5 border border-white/10 text-slate-400 hover:text-white disabled:opacity-40'
+                }`}
+              >
+                <Speaker className="w-4 h-4" />
+                F5-TTS (Voice Clone)
+              </button>
+              <button
+                onClick={() => onUpdateSettings({ ttsProvider: 'webspeech' })}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium transition-all ${
+                  settings.ttsProvider === 'webspeech'
+                    ? 'bg-cyan-500/20 border border-cyan-400 text-cyan-200 shadow-lg shadow-cyan-500/20'
+                    : 'bg-white/5 border border-white/10 text-slate-400 hover:text-white'
+                }`}
+              >
+                <Volume2 className="w-4 h-4" />
+                Browser TTS
+              </button>
+            </div>
+
+            {!backendAvailable && (
+              <p className="text-xs text-rose-300">
+                F5-TTS backend unreachable — using Browser TTS fallback.
+                Start the backend (cd backend && uvicorn server:app --reload) to enable voice cloning.
+              </p>
+            )}
+          </div>
+
+          {/* Voice Reference */}
+          <div className="space-y-3 pt-2 border-t border-white/10">
+            <label className="flex items-center gap-2 text-xs font-mono tracking-wider text-slate-400 uppercase">
+              <Mic className="w-3.5 h-3.5 text-purple-400" />
+              Reference Voice Sample
+            </label>
+
+            {settings.ttsProvider === 'f5tts' && (
+              <VoiceReferenceCapture
+                reference={settings.referenceVoice}
+                onReferenceChange={(ref) => onUpdateSettings({ referenceVoice: ref })}
+                theme={COLOR_THEMES[settings.theme]}
+                backendAvailable={backendAvailable}
+              />
+            )}
           </div>
         </div>
       </div>

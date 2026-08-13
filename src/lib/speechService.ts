@@ -1,4 +1,8 @@
 // Web Speech API interface definitions
+// Used for:
+//   - Speech-to-text (STT) input: startListening() transcribes user speech to text.
+//   - Fallback TTS output: speak() uses the browser's SpeechSynthesis when the
+//     F5-TTS backend is unavailable or the user selects "Browser TTS" in settings.
 interface SpeechRecognitionEventLike {
   results: {
     [index: number]: {

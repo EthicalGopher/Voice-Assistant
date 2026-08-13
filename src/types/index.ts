@@ -32,6 +32,14 @@ export interface AssistantSettings {
   speechSynthesis: boolean;
   sensitivity: number;
   userName: string;
+  ttsProvider: 'f5tts' | 'webspeech';
+  referenceVoice: VoiceReference | null;
+}
+
+export interface VoiceReference {
+  refId: string;
+  refText: string;
+  fileName: string;
 }
 
 export interface TranscriptEntry {
