@@ -1,0 +1,140 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-outfit: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-jakarta: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-space: 'Space Grotesk', monospace;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #05070d;
+    color: #e2e8f0;
+    font-family: var(--font-jakarta);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  #root {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    position: relative;
+  }
+}
+
+/* Custom glowing effects & keyframes */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(0.92);
+    opacity: 0.8;
+  }
+}
+
+@keyframes float-subtle {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes glow-breathe {
+  0%, 100% {
+    opacity: 0.4;
+    filter: drop-shadow(0 0 15px rgba(0, 240, 255, 0.4));
+  }
+  50% {
+    opacity: 0.9;
+    filter: drop-shadow(0 0 30px rgba(138, 43, 226, 0.8));
+  }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-float {
+  animation: float-subtle 4s ease-in-out infinite;
+}
+
+.animate-glow {
+  animation: glow-breathe 3.5s ease-in-out infinite;
+}
+
+@keyframes mic-vibrate {
+  0% { transform: scale(1.05) translate(0px, 0px); }
+  25% { transform: scale(1.12) translate(-1px, 1px); }
+  50% { transform: scale(1.08) translate(1px, -1px); }
+  75% { transform: scale(1.15) translate(-1px, -1px); }
+  100% { transform: scale(1.05) translate(0px, 0px); }
+}
+
+.animate-mic-vibrate {
+  animation: mic-vibrate 0.12s linear infinite;
+}
+
+/* Glassmorphism utilities */
+.glass-panel {
+  background: rgba(13, 19, 33, 0.55);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(0, 240, 255, 0.05);
+}
+
+.glass-button {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(0, 240, 255, 0.4);
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+.glass-button:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(5, 7, 13, 0.8);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 240, 255, 0.4);
+}
