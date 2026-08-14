@@ -1,46 +1,25 @@
-import { useState, useEffect } from 'react';
-import { useSpeech } from 'react-text-to-speech';
+import { useEffect } from 'react';
+import { useVoices } from 'react-text-to-speech';
 
 interface SpeakCallbacks {
   onStart?: () => void;
   onEnd?: () => void;
 }
 
-let setTextState: ((text: string) => void) | null = null;
-let stateStop: (() => void) | null = null;
+let voicesRef: SpeechSynthesisVoice[] = [];
+let isBridgeMounted = false;
 const callbacksRef = { current: {} as SpeakCallbacks };
 
 export function DefaultTTSBridge() {
-  const [text, setText] = useState('');
-
-  const { start, stop } = useSpeech({
-    text,
-    autoPlay: false,
-    stableText: true,
-    preserveUtteranceQueue: false,
-    onStart: () => {
-      callbacksRef.current.onStart?.();
-    },
-    onStop: () => {
-      callbacksRef.current.onEnd?.();
-      callbacksRef.current = {};
-    },
-  });
+  const { voices } = useVoices();
 
   useEffect(() => {
-    setTextState = setText;
-    stateStop = stop;
+    voicesRef = voices;
+    isBridgeMounted = true;
     return () => {
-      setTextState = null;
-      stateStop = null;
+      isBridgeMounted = false;
     };
-  }, [setText, stop]);
-
-  useEffect(() => {
-    if (text) {
-      start();
-    }
-  }, [text, start]);
+  }, [voices]);
 
   return null;
 }
@@ -51,17 +30,57 @@ export function speakViaDefault(
   onStart?: () => void,
   onEnd?: () => void,
 ): boolean {
-  if (!setTextState) {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
     return false;
   }
+
+  if (!isBridgeMounted) {
+    return false;
+  }
+
   callbacksRef.current = { onStart, onEnd };
-  setTextState(text);
+
+  window.speechSynthesis.cancel();
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  let ended = false;
+
+  const endHandler = () => {
+    if (ended) return;
+    ended = true;
+    callbacksRef.current.onEnd?.();
+    callbacksRef.current = {};
+  };
+
+  utterance.onstart = () => {
+    callbacksRef.current.onStart?.();
+  };
+
+  utterance.onend = endHandler;
+  utterance.onerror = endHandler;
+
+  if (voicesRef.length > 0) {
+    const voice =
+      voicesRef.find((v) => v.lang.startsWith('en')) || voicesRef[0];
+    utterance.voice = voice;
+  }
+
+  window.speechSynthesis.speak(utterance);
+
+  setTimeout(() => {
+    if (!ended) {
+      ended = true;
+      callbacksRef.current.onEnd?.();
+      callbacksRef.current = {};
+    }
+  }, 30000);
+
   return true;
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function stopDefaultTTS(): void {
-  if (stateStop) {
-    stateStop();
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
   }
 }

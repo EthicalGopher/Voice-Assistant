@@ -1,4 +1,4 @@
-import { Settings, Command } from 'lucide-react';
+import { Settings } from 'lucide-react';
 import type { ColorTheme } from '../types';
 
 interface HeaderProps {

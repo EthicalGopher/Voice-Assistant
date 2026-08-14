@@ -125,10 +125,33 @@ export class TTSClient {
         console.warn('[ttsClient] F5-TTS request failed, falling back to browser TTS:', e);
       }
     }
-    if (speakViaDefault(text, onStarted, onEnded)) {
+
+    let started = false;
+    let ended = false;
+
+    const safeStart = () => {
+      if (started || ended) return;
+      started = true;
+      onStarted?.();
+    };
+
+    const safeEnd = () => {
+      if (ended) return;
+      ended = true;
+      onEnded?.();
+    };
+
+    if (speakViaDefault(text, safeStart, safeEnd)) {
+      setTimeout(() => {
+        if (!started && !ended) {
+          safeStart();
+          const durationMs = Math.max(1500, (text.split(' ').length / 3) * 1000);
+          setTimeout(safeEnd, durationMs);
+        }
+      }, 500);
       return;
     }
-    speechServiceInstance.speak(text, onStarted, onEnded);
+    speechServiceInstance.speak(text, safeStart, safeEnd);
   }
 
   private async speakViaF5(
