@@ -22,23 +22,28 @@ export function TextInputModal({
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => inputRef.current?.focus(), 100);
-    } else {
-      setInputVal('');
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
+  const handleClose = () => {
+    setInputVal('');
+    onClose();
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (inputVal.trim()) {
       onSubmitPrompt(inputVal.trim());
+      setInputVal('');
       onClose();
     }
   };
 
   const handleSelectSample = (sample: string) => {
     onSubmitPrompt(sample);
+    setInputVal('');
     onClose();
   };
 
@@ -57,7 +62,7 @@ export function TextInputModal({
             </h3>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition-all"
             aria-label="Close"
           >

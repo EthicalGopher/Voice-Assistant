@@ -9,11 +9,12 @@ interface AIOrbProps {
   theme: ColorTheme;
 }
 
-// GLSL Shader for realistic vibrating liquid water drop (Static position, no rotation spinning)
+// GLSL Shader for realistic vibrating liquid water drop (Restored classic fluid vibrations modulated by pitch)
 const WaterDropShader = {
   vertexShader: `
     uniform float uTime;
     uniform float uAudioVolume;
+    uniform float uPitch;
     uniform float uVibrationSpeed;
     uniform float uVibrationIntensity;
     
@@ -31,12 +32,13 @@ const WaterDropShader = {
       pos.xz *= dropShape;
 
       // Fluid liquid surface ripples and water-drop vibrations
-      float r1 = sin(pos.x * 5.0 + pos.y * 7.0 + uTime * uVibrationSpeed * 4.0);
-      float r2 = cos(pos.y * 8.0 - pos.z * 6.0 + uTime * uVibrationSpeed * 3.2);
-      float r3 = sin(pos.z * 10.0 + pos.x * 8.0 + uTime * uVibrationSpeed * 5.0);
+      float speed = uVibrationSpeed * (0.9 + uPitch * 0.4);
+      float r1 = sin(pos.x * 5.0 + pos.y * 7.0 + uTime * speed * 4.0);
+      float r2 = cos(pos.y * 8.0 - pos.z * 6.0 + uTime * speed * 3.2);
+      float r3 = sin(pos.z * 10.0 + pos.x * 8.0 + uTime * speed * 5.0);
 
-      float combinedRipple = (r1 * 0.45 + r2 * 0.35 + r3 * 0.2);
-      float displacement = combinedRipple * (0.05 + uAudioVolume * 0.38 + uVibrationIntensity * 0.15);
+      float combinedRipple = (r1 * 0.45 + r2 * 0.35 + r3 * 0.20);
+      float displacement = combinedRipple * (0.05 + uAudioVolume * 0.32 + uVibrationIntensity * 0.15);
       vRipple = displacement;
 
       vec3 finalPosition = pos + normal * displacement;
@@ -46,6 +48,7 @@ const WaterDropShader = {
   fragmentShader: `
     uniform float uTime;
     uniform float uAudioVolume;
+    uniform float uPitch;
     uniform vec3 uColorPrimary;
     uniform vec3 uColorSecondary;
     uniform vec3 uColorAccent;
@@ -67,7 +70,7 @@ const WaterDropShader = {
       vec3 reflectDir = reflect(-lightDir, vNormal);
       float specular = pow(max(0.0, dot(viewDir, reflectDir)), 32.0);
 
-      vec3 finalColor = liquidHighlight + uColorPrimary * fresnel * (1.2 + uAudioVolume * 1.5);
+      vec3 finalColor = liquidHighlight + uColorPrimary * fresnel * (1.2 + uAudioVolume * 1.5 + uPitch * 0.3);
       finalColor += vec3(1.0) * specular * 0.6; // High gloss water sheen
 
       float alpha = clamp(0.82 + fresnel * 0.18, 0.0, 1.0);
@@ -85,11 +88,13 @@ export function AIOrb({ state, theme }: AIOrbProps) {
   const speedLerpRef = useRef(1.0);
   const intensityLerpRef = useRef(0.5);
   const scaleLerpRef = useRef(1.0);
+  const pitchLerpRef = useRef(0.5);
 
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
       uAudioVolume: { value: 0 },
+      uPitch: { value: 0.5 },
       uVibrationSpeed: { value: 1.0 },
       uVibrationIntensity: { value: 0.5 },
       uColorPrimary: { value: new THREE.Color(theme.primary) },
@@ -116,33 +121,43 @@ export function AIOrb({ state, theme }: AIOrbProps) {
     let targetSpeed = 1.0;
     let targetIntensity = 0.5;
     let targetScale = 1.0 + audioData.smoothedVolume * 0.35;
+    const targetPitch = audioData.pitch;
 
-    if (state === 'listening') {
+    if (state === 'idle') {
+      targetSpeed = 1.0;
+      targetIntensity = 0.4;
+      targetScale = 1.0 + Math.sin(time * 1.5) * 0.02;
+    } else if (state === 'listening') {
       targetSpeed = 2.4;
       targetIntensity = 1.2;
       targetScale += 0.1;
     } else if (state === 'processing') {
-      targetSpeed = 4.0;
-      targetIntensity = 1.8;
-      targetScale += 0.06;
+      // Thinking: Smooth rhythmic pulse
+      targetSpeed = 1.6;
+      targetIntensity = 0.6;
+      targetScale += 0.04;
     } else if (state === 'speaking') {
-      targetSpeed = 2.8;
-      targetIntensity = 1.3;
-      targetScale += Math.sin(time * 8) * 0.06;
+      // Speaking: Active water drop vibrations modulated by vocal pitch
+      targetSpeed = 2.8 + audioData.pitch * 1.2;
+      targetIntensity = 1.2 + audioData.pitch * 0.4 + audioData.volume * 0.5;
+      targetScale += Math.sin(time * 8) * 0.05;
     }
 
-    // Smooth lerps for vibration and scale (NO ROTATION)
-    speedLerpRef.current += (targetSpeed - speedLerpRef.current) * 0.05;
-    intensityLerpRef.current += (targetIntensity - intensityLerpRef.current) * 0.05;
+    // Smooth lerps for vibration, pitch and scale (steady orientation, no rotation)
+    speedLerpRef.current += (targetSpeed - speedLerpRef.current) * 0.06;
+    intensityLerpRef.current += (targetIntensity - intensityLerpRef.current) * 0.06;
     scaleLerpRef.current += (targetScale - scaleLerpRef.current) * 0.08;
+    pitchLerpRef.current += (targetPitch - pitchLerpRef.current) * 0.10;
 
     const smoothSpeed = speedLerpRef.current;
     const smoothIntensity = intensityLerpRef.current;
     const smoothScale = scaleLerpRef.current;
+    const smoothPitch = pitchLerpRef.current;
 
     if (waterDropMatRef.current) {
       waterDropMatRef.current.uniforms.uTime.value = time;
       waterDropMatRef.current.uniforms.uAudioVolume.value = audioData.smoothedVolume;
+      waterDropMatRef.current.uniforms.uPitch.value = smoothPitch;
       waterDropMatRef.current.uniforms.uVibrationSpeed.value = smoothSpeed;
       waterDropMatRef.current.uniforms.uVibrationIntensity.value = smoothIntensity;
       waterDropMatRef.current.uniforms.uColorPrimary.value.set(theme.primary);

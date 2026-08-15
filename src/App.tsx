@@ -2,9 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { AssistantSettings } from './types';
 import { COLOR_THEMES } from './lib/colorThemes';
 import { audioEngineInstance } from './lib/audioEngine';
-import { speechServiceInstance } from './lib/speechService';
 import { ttsClient } from './lib/ttsClient';
-import { generateAIResponse } from './lib/aiResponses';
+import { ollamaClient } from './lib/ollamaClient';
 import { useAssistantUiVoice } from './hooks/useAssistantUiVoice';
 import { useAudioAnalyzer } from './hooks/useAudioAnalyzer';
 
@@ -16,7 +15,8 @@ import { TranscriptView } from './components/TranscriptView';
 import { VoiceControls } from './components/VoiceControls';
 import { TextInputModal } from './components/TextInputModal';
 import { SettingsModal } from './components/SettingsModal';
-import { DefaultTTSBridge } from './lib/defaultTtsBridge';
+
+import { getBackendUrl, setBackendUrl } from './config';
 
 export default function App() {
   const {
@@ -26,6 +26,7 @@ export default function App() {
     isSessionActive,
     startVoiceSession,
     stopVoiceSession,
+    submitSpokenQuery,
     setTranscript,
     setState,
     setAssistantReply,
@@ -48,7 +49,8 @@ export default function App() {
     speechSynthesis: true,
     sensitivity: 1.0,
     userName: 'Alex',
-    ttsProvider: 'f5tts',
+    ollamaModel: 'llama3.2',
+    customBackendUrl: getBackendUrl(),
     referenceVoice: null,
   });
 
@@ -59,28 +61,28 @@ export default function App() {
 
   const theme = useMemo(() => COLOR_THEMES[settings.theme] || COLOR_THEMES.cyber, [settings.theme]);
 
-  // Handle typed directive submission
+  // Handle typed directive submission via Ollama
   const handleProcessQuery = useCallback(
-    (query: string) => {
+    async (query: string) => {
       setState('processing');
       audioEngineInstance.playSoundFx('processing');
 
-      setTimeout(() => {
-        const result = generateAIResponse(query);
-        setAssistantReply(result.replyText);
-        setState('speaking');
-        audioEngineInstance.playSoundFx('response');
+      const result = await ollamaClient.generateResponse(query, settings.ollamaModel);
+      setAssistantReply(result.reply);
+      setState('speaking');
+      audioEngineInstance.playSoundFx('response');
 
-        ttsClient.speak(
-          result.replyText,
-          () => {},
-          () => {
-            setState('idle');
-          }
-        );
-      }, 1000);
+      ttsClient.speak(
+        result.reply,
+        () => {
+          setState('speaking');
+        },
+        () => {
+          setState('idle');
+        }
+      );
     },
-    [setState, setAssistantReply]
+    [setState, setAssistantReply, settings.ollamaModel]
   );
 
   // Toggle Voice Input / Session
@@ -97,7 +99,6 @@ export default function App() {
     setIsSoundMuted((prev) => {
       const next = !prev;
       audioEngineInstance.setSoundEffects(!next);
-      speechServiceInstance.setSpeechSynthesis(!next);
       ttsClient.setMuted(next);
       return next;
     });
@@ -110,11 +111,9 @@ export default function App() {
       if (newSettings.soundEffects !== undefined) {
         audioEngineInstance.setSoundEffects(newSettings.soundEffects);
       }
-      if (newSettings.speechSynthesis !== undefined) {
-        speechServiceInstance.setSpeechSynthesis(newSettings.speechSynthesis);
-      }
-      if (newSettings.ttsProvider !== undefined) {
-        ttsClient.setProvider(newSettings.ttsProvider);
+      if (newSettings.customBackendUrl !== undefined) {
+        setBackendUrl(newSettings.customBackendUrl);
+        ttsClient.checkBackend().then((ok) => setBackendAvailable(ok));
       }
       if (newSettings.referenceVoice !== undefined) {
         ttsClient.setReference(newSettings.referenceVoice);
@@ -123,20 +122,28 @@ export default function App() {
     });
   };
 
-  // Keyboard Shortcuts Listener
+  const [isPushToTalkActive, setIsPushToTalkActive] = useState(false);
+
+  // Keyboard Shortcuts Listener for Push-to-Talk ('M' key hold and release)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
 
-      if (e.code === 'Space') {
+      if ((e.key === 'm' || e.key === 'M') && !e.repeat) {
+        e.preventDefault();
+        setIsPushToTalkActive(true);
+        if (!isSessionActive) {
+          startVoiceSession();
+        }
+      } else if (e.code === 'Space' && !e.repeat) {
         e.preventDefault();
         handleToggleMic();
       } else if (e.key === 'k' || e.key === 'K') {
         e.preventDefault();
         setIsTextInputOpen(true);
-      } else if (e.key === 'm' || e.key === 'M') {
+      } else if (e.key === 's' || e.key === 'S') {
         e.preventDefault();
         handleToggleSound();
       } else if (e.key === 'Escape') {
@@ -146,13 +153,28 @@ export default function App() {
       }
     };
 
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
+        setIsPushToTalkActive(false);
+        submitSpokenQuery();
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleToggleMic, handleToggleSound, stopVoiceSession]);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isSessionActive, startVoiceSession, stopVoiceSession, handleToggleMic, handleToggleSound, submitSpokenQuery]);
 
   return (
     <main className="relative w-screen h-screen overflow-hidden bg-[#05070d] text-white flex flex-col justify-between font-jakarta selection:bg-cyan-500/30 select-none">
-      <DefaultTTSBridge />
       {/* Header Bar */}
       <Header
         userName={settings.userName}
@@ -176,7 +198,7 @@ export default function App() {
       {/* Bottom Interface Overlay */}
       <div className="absolute bottom-6 left-0 right-0 z-30 flex flex-col items-center justify-end px-4 pointer-events-none">
         {/* Status text */}
-        <StatusText state={state} theme={theme} />
+        <StatusText state={state} theme={theme} isPushToTalkActive={isPushToTalkActive} />
 
         {/* Transcript text view */}
         <TranscriptView

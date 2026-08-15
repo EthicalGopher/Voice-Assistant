@@ -1,0 +1,61 @@
+name: aria-voice-assistant
+
+services:
+  # 1. React Frontend UI Service (Port 5173 / Nginx)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: aria-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+  # 2. FastAPI Python Backend & F5-TTS Voice Engine (Port 8000)
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: aria-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_MODEL=llama3.2
+    depends_on:
+      - ollama
+    volumes:
+      - ./backend/ref_audios:/app/backend/ref_audios
+      - hf_cache:/root/.cache/huggingface
+
+  # 3. Ollama AI Engine Service (Port 11434)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aria-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  # 4. Automatic Ollama Model Puller (Downloads llama3.2 automatically)
+  ollama-init:
+    image: curlimages/curl:latest
+    container_name: aria-ollama-init
+    depends_on:
+      - ollama
+    entrypoint: >
+      /bin/sh -c "
+      echo '⌛ Waiting for Ollama engine to start...';
+      until curl -s http://ollama:11434/api/tags > /dev/null; do sleep 2; done;
+      echo '🚀 Automatically downloading llama3.2 AI model...';
+      curl -s -X POST http://ollama:11434/api/pull -d '{\"name\": \"llama3.2\"}';
+      echo '✅ Ollama model llama3.2 is ready!';
+      "
+
+volumes:
+  ollama_data:
+  hf_cache:

@@ -10,7 +10,7 @@ export function useAudioAnalyzer(state: AssistantState) {
   const reqIdRef = useRef<number | null>(null);
 
   useEffect(() => {
-    let startTime = performance.now();
+    const startTime = performance.now();
 
     const tick = (now: number) => {
       const elapsed = (now - startTime) / 1000;

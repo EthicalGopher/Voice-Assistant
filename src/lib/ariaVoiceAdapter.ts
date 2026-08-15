@@ -2,7 +2,7 @@ import type { RealtimeVoiceAdapter } from '@assistant-ui/react';
 import { audioEngineInstance } from './audioEngine';
 import { speechServiceInstance } from './speechService';
 import { ttsClient } from './ttsClient';
-import { generateAIResponse } from './aiResponses';
+import { ollamaClient } from './ollamaClient';
 
 export class AriaRealtimeVoiceAdapter implements RealtimeVoiceAdapter {
   public connect(options: { abortSignal?: AbortSignal } = {}): RealtimeVoiceAdapter.Session {
@@ -16,6 +16,7 @@ export class AriaRealtimeVoiceAdapter implements RealtimeVoiceAdapter {
     const volumeListeners = new Set<(vol: number) => void>();
 
     let volumeInterval: number | null = null;
+    let isProcessing = false;
 
     const notifyStatus = (status: RealtimeVoiceAdapter.Status) => {
       currentStatus = status;
@@ -31,36 +32,55 @@ export class AriaRealtimeVoiceAdapter implements RealtimeVoiceAdapter {
       transcriptListeners.forEach((cb) => cb(item));
     };
 
-    // Start audio & speech engines
-    audioEngineInstance.startMicrophone().then(() => {
-      if (options.abortSignal?.aborted) return;
-      notifyStatus({ type: 'running' });
+    const startListeningLoop = () => {
+      if (options.abortSignal?.aborted || isProcessing) return;
 
-      if (speechServiceInstance.isSupported()) {
-        speechServiceInstance.startListening(
-          (text, isFinal) => {
-            notifyTranscript({ role: 'user', text, isFinal });
-            notifyMode('listening');
+      audioEngineInstance.startMicrophone().then(() => {
+        if (options.abortSignal?.aborted || isProcessing) return;
+        notifyStatus({ type: 'running' });
 
-            if (isFinal) {
-              // Trigger AI response synthesis
-              notifyMode('speaking');
-              const res = generateAIResponse(text);
-              notifyTranscript({ role: 'assistant', text: res.replyText, isFinal: true });
+        if (speechServiceInstance.isSupported()) {
+          speechServiceInstance.startListening(
+            (text) => {
+              // Live update user's spoken words in real time
+              notifyTranscript({ role: 'user', text, isFinal: false });
+              notifyMode('listening');
+            },
+            (textToSubmit) => {
+              // Silence or key release detected: transition to processing (thinking) state
+              isProcessing = true;
+              notifyTranscript({ role: 'user', text: textToSubmit, isFinal: true });
+              notifyMode('processing' as unknown as RealtimeVoiceAdapter.Mode);
+              audioEngineInstance.stopMicrophone();
+              audioEngineInstance.playSoundFx('processing');
 
-              ttsClient.speak(
-                res.replyText,
-                () => notifyMode('speaking'),
-                () => notifyMode('listening')
-              );
+              ollamaClient.generateResponse(textToSubmit).then((res) => {
+                notifyTranscript({ role: 'assistant', text: res.reply, isFinal: true });
+                audioEngineInstance.playSoundFx('response');
+
+                ttsClient.speak(
+                  res.reply,
+                  () => notifyMode('speaking'),
+                  () => {
+                    isProcessing = false;
+                    disconnectSession();
+                  }
+                );
+              }).catch(() => {
+                isProcessing = false;
+                disconnectSession();
+              });
+            },
+            () => {
+              // Recognition ended
             }
-          },
-          () => {
-            // Speech recognition ended
-          }
-        );
-      }
-    });
+          );
+        }
+      });
+    };
+
+    // Initial start
+    startListeningLoop();
 
     // Periodically report volume changes for visualizations
     volumeInterval = window.setInterval(() => {
@@ -79,13 +99,13 @@ export class AriaRealtimeVoiceAdapter implements RealtimeVoiceAdapter {
     }
 
     const disconnectSession = () => {
+      isProcessing = true;
       if (volumeInterval !== null) {
         clearInterval(volumeInterval);
         volumeInterval = null;
       }
-       audioEngineInstance.stopMicrophone();
+      audioEngineInstance.stopMicrophone();
       speechServiceInstance.stopListening();
-      speechServiceInstance.stopSpeaking();
       ttsClient.stop();
       notifyStatus({ type: 'ended', reason: 'finished' });
     };
@@ -100,12 +120,12 @@ export class AriaRealtimeVoiceAdapter implements RealtimeVoiceAdapter {
       disconnect: disconnectSession,
       mute: () => {
         isMuted = true;
-      audioEngineInstance.stopMicrophone();
+        audioEngineInstance.stopMicrophone();
         speechServiceInstance.stopListening();
       },
       unmute: () => {
         isMuted = false;
-        audioEngineInstance.startMicrophone();
+        startListeningLoop();
       },
       onStatusChange: (cb) => {
         statusListeners.add(cb);

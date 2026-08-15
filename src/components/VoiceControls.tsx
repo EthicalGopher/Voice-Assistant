@@ -107,8 +107,8 @@ export function VoiceControls({
               ? `0 0 15px ${theme.primary}66`
               : '0 10px 30px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255,255,255,0.2)',
           }}
-          title={isListening ? 'Stop Listening (Spacebar)' : 'Start Listening (Spacebar)'}
-          aria-label={isListening ? 'Stop Voice Input' : 'Start Voice Input'}
+          title={isListening ? 'Stop Recording (Spacebar)' : 'Start Recording (Hold M or Spacebar)'}
+          aria-label={isListening ? 'Stop Recording' : 'Start Recording'}
         >
           {isListening ? (
             <MicOff

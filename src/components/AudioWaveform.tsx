@@ -15,6 +15,7 @@ const WaveformVertexShader = `
   uniform float uAudioVolume;
   uniform float uAudioBass;
   uniform float uAudioTreble;
+  uniform float uAudioPitch;
   uniform float uSpeed;
   uniform float uStrandIndex;
   
@@ -31,11 +32,11 @@ const WaveformVertexShader = `
     float envelope = exp(-pow(x * 0.18, 2.0));
     vEnvelope = envelope;
 
-    // Multi-harmonic silk wave curves
+    // Multi-harmonic silk wave curves modulated by pitch
     float phaseShift = uStrandIndex * 1.047;
-    float freq1 = 0.45 + uStrandIndex * 0.08;
-    float freq2 = 0.95 + uStrandIndex * 0.12;
-    float freq3 = 2.10 - uStrandIndex * 0.15;
+    float freq1 = (0.45 + uStrandIndex * 0.08) * (0.8 + uAudioPitch * 0.5);
+    float freq2 = (0.95 + uStrandIndex * 0.12) * (0.8 + uAudioPitch * 0.6);
+    float freq3 = (2.10 - uStrandIndex * 0.15) * (0.9 + uAudioPitch * 0.4);
 
     float wave1 = sin(x * freq1 + uTime * uSpeed * 1.8 + phaseShift);
     float wave2 = sin(x * freq2 - uTime * uSpeed * 1.2 + phaseShift * 1.4);
@@ -43,8 +44,8 @@ const WaveformVertexShader = `
 
     float combinedWave = wave1 * 0.5 + wave2 * 0.35 + wave3 * 0.15;
 
-    // Vertical Y displacement
-    float audioBoost = uAudioVolume * 1.4 + uAudioBass * 0.8 + uAudioTreble * 0.6;
+    // Vertical Y displacement with pitch harmonic boost
+    float audioBoost = uAudioVolume * 1.4 + uAudioBass * 0.8 + uAudioTreble * 0.6 + uAudioPitch * uAudioVolume * 0.6;
     float amplitude = (0.28 + audioBoost) * envelope;
     float yDisplacement = combinedWave * amplitude;
 
@@ -120,6 +121,7 @@ export function AudioWaveform({ state, theme }: AudioWaveformProps) {
         mat.uniforms.uAudioVolume.value = audioData.smoothedVolume;
         mat.uniforms.uAudioBass.value = audioData.bass;
         mat.uniforms.uAudioTreble.value = audioData.treble;
+        mat.uniforms.uAudioPitch.value = audioData.pitch;
         mat.uniforms.uSpeed.value = speed;
 
         const cfg = strandConfigs[idx % strandConfigs.length];
@@ -147,6 +149,7 @@ export function AudioWaveform({ state, theme }: AudioWaveformProps) {
               uAudioVolume: { value: 0 },
               uAudioBass: { value: 0 },
               uAudioTreble: { value: 0 },
+              uAudioPitch: { value: 0.5 },
               uSpeed: { value: 1.0 },
               uStrandIndex: { value: idx },
               uColor1: { value: new THREE.Color(cfg.color1) },

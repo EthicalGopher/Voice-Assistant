@@ -18,6 +18,8 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.venv/
+.backend.pid
 backend/.env
 backend/ref_audios/
 backend/*_models/

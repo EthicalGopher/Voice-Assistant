@@ -42,16 +42,6 @@ export function TranscriptView({
         “{textToDisplay}”
       </p>
 
-      {/* Action pill summary if available during speech */}
-      {assistantResponse && state === 'speaking' && (
-        <span
-          className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono tracking-wider glass-button text-cyan-300/90 animate-fade-in"
-          style={{ borderColor: `${theme.primary}44` }}
-        >
-          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-          Aria Neural Stream Active
-        </span>
-      )}
     </div>
   );
 }

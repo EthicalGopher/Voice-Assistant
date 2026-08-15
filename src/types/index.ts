@@ -5,6 +5,8 @@ export interface AudioData {
   bass: number;            // 0 to 1 low frequency energy
   mid: number;             // 0 to 1 mid frequency energy
   treble: number;          // 0 to 1 high frequency energy
+  pitch: number;           // 0 to 1 normalized pitch level (low to high vocal frequency)
+  pitchFrequency: number;  // Fundamental pitch frequency in Hz
   rawFrequencies: Uint8Array;
   timeDomainData: Uint8Array;
   smoothedVolume: number;
@@ -32,7 +34,8 @@ export interface AssistantSettings {
   speechSynthesis: boolean;
   sensitivity: number;
   userName: string;
-  ttsProvider: 'f5tts' | 'webspeech';
+  ollamaModel: string;
+  customBackendUrl: string;
   referenceVoice: VoiceReference | null;
 }
 

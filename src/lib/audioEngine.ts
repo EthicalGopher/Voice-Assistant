@@ -5,16 +5,20 @@ export class AudioEngine {
   private analyser: AnalyserNode | null = null;
   private micStream: MediaStream | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
+  private activeTTSSource: AudioBufferSourceNode | null = null;
   
   private freqArray: Uint8Array = new Uint8Array(256);
   private timeArray: Uint8Array = new Uint8Array(256);
   
   private isMicActive = false;
+  private isTTSPlaying = false;
   private smoothedVol = 0;
+  private smoothedPitch = 0.5;
+  private smoothedPitchFreq = 220;
   private soundEffectsEnabled = true;
 
   constructor() {
-    // Lazy audio context init on user gesture
+    // Audio context initialized on first interaction
   }
 
   private initContext(): AudioContext {
@@ -22,13 +26,13 @@ export class AudioEngine {
       const AudioCtxClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.audioCtx = new AudioCtxClass();
       this.analyser = this.audioCtx.createAnalyser();
-      this.analyser.fftSize = 512;
-      this.analyser.smoothingTimeConstant = 0.82;
+      this.analyser.fftSize = 1024;
+      this.analyser.smoothingTimeConstant = 0.8;
       this.freqArray = new Uint8Array(this.analyser.frequencyBinCount);
       this.timeArray = new Uint8Array(this.analyser.frequencyBinCount);
     }
     if (this.audioCtx.state === 'suspended') {
-      this.audioCtx.resume();
+      this.audioCtx.resume().catch(() => {});
     }
     return this.audioCtx;
   }
@@ -74,8 +78,67 @@ export class AudioEngine {
     this.isMicActive = false;
   }
 
+  public async playAudioWav(
+    wavBytes: Uint8Array,
+    onStarted?: () => void,
+    onEnded?: () => void
+  ): Promise<void> {
+    try {
+      const ctx = this.initContext();
+      this.stopAudio();
+
+      const arrayBuffer = new ArrayBuffer(wavBytes.byteLength);
+      new Uint8Array(arrayBuffer).set(wavBytes);
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+
+      if (this.analyser) {
+        source.connect(this.analyser);
+        this.analyser.connect(ctx.destination);
+      } else {
+        source.connect(ctx.destination);
+      }
+
+      this.activeTTSSource = source;
+      this.isTTSPlaying = true;
+
+      source.onended = () => {
+        this.isTTSPlaying = false;
+        this.activeTTSSource = null;
+        onEnded?.();
+      };
+
+      source.start(0);
+      onStarted?.();
+    } catch (err) {
+      console.warn('[AudioEngine] WAV playback failed:', err);
+      this.isTTSPlaying = false;
+      this.activeTTSSource = null;
+      onEnded?.();
+    }
+  }
+
+  public stopAudio() {
+    if (this.activeTTSSource) {
+      try {
+        this.activeTTSSource.stop();
+        this.activeTTSSource.disconnect();
+      } catch {
+        // Source may already have ended
+      }
+      this.activeTTSSource = null;
+    }
+    this.isTTSPlaying = false;
+  }
+
   public getIsMicActive(): boolean {
     return this.isMicActive;
+  }
+
+  public getIsTTSPlaying(): boolean {
+    return this.isTTSPlaying;
   }
 
   public setSoundEffects(enabled: boolean) {
@@ -83,10 +146,54 @@ export class AudioEngine {
   }
 
   /**
+   * Fast time-domain autocorrelation for vocal fundamental frequency (pitch) detection
+   */
+  private detectPitchFromTimeDomain(timeData: Uint8Array, sampleRate: number): number {
+    const size = timeData.length;
+    let rms = 0;
+    const floatBuf = new Float32Array(size);
+
+    for (let i = 0; i < size; i++) {
+      const val = (timeData[i] - 128) / 128;
+      floatBuf[i] = val;
+      rms += val * val;
+    }
+    rms = Math.sqrt(rms / size);
+    if (rms < 0.015) {
+      return -1; // Audio too quiet
+    }
+
+    // Vocal fundamental frequency range: 80Hz to 600Hz
+    const minLag = Math.max(1, Math.floor(sampleRate / 600));
+    const maxLag = Math.min(Math.floor(size / 2), Math.floor(sampleRate / 80));
+
+    let bestLag = -1;
+    let maxCorr = -1;
+
+    for (let lag = minLag; lag <= maxLag; lag++) {
+      let corr = 0;
+      for (let i = 0; i < size - lag; i++) {
+        corr += floatBuf[i] * floatBuf[i + lag];
+      }
+      if (corr > maxCorr) {
+        maxCorr = corr;
+        bestLag = lag;
+      }
+    }
+
+    if (bestLag > 0 && maxCorr > 0.25) {
+      return sampleRate / bestLag;
+    }
+    return -1;
+  }
+
+  /**
    * Get real-time or procedural audio metrics for Three.js visualization
    */
   public getAudioData(state: AssistantState, time: number): AudioData {
-    if (this.isMicActive && this.analyser) {
+    const isLiveAudio = (this.isMicActive || this.isTTSPlaying) && this.analyser !== null;
+
+    if (isLiveAudio && this.analyser) {
       this.analyser.getByteFrequencyData(this.freqArray as unknown as Uint8Array<ArrayBuffer>);
       this.analyser.getByteTimeDomainData(this.timeArray as unknown as Uint8Array<ArrayBuffer>);
 
@@ -94,6 +201,8 @@ export class AudioEngine {
       let bassSum = 0;
       let midSum = 0;
       let trebleSum = 0;
+      let weightedFreqSum = 0;
+      let totalFreqMag = 0;
 
       const len = this.freqArray.length;
       for (let i = 0; i < len; i++) {
@@ -102,6 +211,9 @@ export class AudioEngine {
         if (i < 16) bassSum += val;
         else if (i < 80) midSum += val;
         else trebleSum += val;
+
+        weightedFreqSum += i * val;
+        totalFreqMag += val;
       }
 
       const rawVol = sum / (len * 255);
@@ -109,14 +221,37 @@ export class AudioEngine {
       const mid = midSum / (64 * 255);
       const treble = trebleSum / ((len - 80) * 255);
 
-      // Smooth volume for organic visuals
-      this.smoothedVol += (rawVol - this.smoothedVol) * 0.25;
+      // Pitch detection via autocorrelation & spectral centroid
+      const sampleRate = this.audioCtx ? this.audioCtx.sampleRate : 44100;
+      const detectedFreq = this.detectPitchFromTimeDomain(this.timeArray, sampleRate);
+      
+      let currentPitchFreq = this.smoothedPitchFreq;
+      let currentNormPitch = this.smoothedPitch;
+
+      if (detectedFreq > 60 && detectedFreq < 800) {
+        currentPitchFreq = detectedFreq;
+        // Map 80Hz - 500Hz to 0.0 - 1.0 normalized pitch
+        currentNormPitch = Math.max(0, Math.min(1, (detectedFreq - 80) / 420));
+      } else if (totalFreqMag > 10) {
+        // Fallback to spectral centroid
+        const centroidBin = weightedFreqSum / totalFreqMag;
+        const centroidFreq = (centroidBin * (sampleRate / 2)) / len;
+        currentPitchFreq = Math.max(80, Math.min(600, centroidFreq * 0.35));
+        currentNormPitch = Math.max(0, Math.min(1, (currentPitchFreq - 80) / 420));
+      }
+
+      // Smooth metrics for organic 3D fluid responses
+      this.smoothedVol += (rawVol - this.smoothedVol) * 0.28;
+      this.smoothedPitch += (currentNormPitch - this.smoothedPitch) * 0.2;
+      this.smoothedPitchFreq += (currentPitchFreq - this.smoothedPitchFreq) * 0.2;
 
       return {
         volume: rawVol,
         bass,
         mid,
         treble,
+        pitch: this.smoothedPitch,
+        pitchFrequency: this.smoothedPitchFreq,
         rawFrequencies: this.freqArray,
         timeDomainData: this.timeArray,
         smoothedVolume: this.smoothedVol,
@@ -131,41 +266,53 @@ export class AudioEngine {
     let targetVol = 0.08;
     let speed = 1.0;
     let chaos = 0.05;
+    let targetPitchFreq = 220;
 
     switch (state) {
       case 'idle':
-        targetVol = 0.08 + Math.sin(time * 1.5) * 0.03 + Math.sin(time * 0.7) * 0.02;
-        speed = 1.2;
-        chaos = 0.04;
+        targetVol = 0.05 + Math.sin(time * 1.2) * 0.02;
+        speed = 0.8;
+        chaos = 0.01;
+        targetPitchFreq = 180 + Math.sin(time * 0.8) * 15;
         break;
       case 'listening':
-        targetVol = 0.35 + Math.sin(time * 4) * 0.15 + Math.sin(time * 8.5) * 0.08;
-        speed = 3.0;
-        chaos = 0.15;
+        targetVol = 0.22 + Math.sin(time * 3.0) * 0.08;
+        speed = 1.6;
+        chaos = 0.05;
+        targetPitchFreq = 230 + Math.sin(time * 2.5) * 30;
         break;
       case 'processing':
-        targetVol = 0.25 + Math.sin(time * 6) * 0.12 + Math.cos(time * 12) * 0.06;
-        speed = 4.5;
-        chaos = 0.2;
+        // Smooth, calm neural thinking pulsation (zero high-frequency jitter)
+        targetVol = 0.12 + Math.sin(time * 2.0) * 0.03;
+        speed = 0.9;
+        chaos = 0.01;
+        targetPitchFreq = 220 + Math.sin(time * 1.5) * 15;
         break;
-      case 'speaking':
-        // Complex speech cadence simulation with syllable bursts
-        const speechEnvelope = Math.max(0, Math.sin(time * 5.5) * Math.cos(time * 2.3));
-        const syllables = Math.sin(time * 14) * 0.3 + Math.sin(time * 22) * 0.15;
-        targetVol = 0.38 + speechEnvelope * 0.35 + Math.abs(syllables) * 0.2;
-        speed = 3.5;
-        chaos = 0.25;
+      case 'speaking': {
+        // Natural, smooth conversational speech envelope
+        const speechEnvelope = Math.max(0, Math.sin(time * 3.8) * Math.cos(time * 1.9));
+        const syllables = Math.sin(time * 8.5) * 0.15 + Math.sin(time * 14.0) * 0.08;
+        targetVol = 0.26 + speechEnvelope * 0.18 + Math.abs(syllables) * 0.1;
+        speed = 1.8;
+        chaos = 0.04;
+
+        // Dynamic intonation pitch modulation (180Hz to 300Hz)
+        const intonation = Math.sin(time * 2.8) * 35 + Math.cos(time * 5.2) * 20;
+        targetPitchFreq = 220 + intonation;
         break;
+      }
     }
 
-    this.smoothedVol += (targetVol - this.smoothedVol) * 0.18;
+    const normPitch = Math.max(0, Math.min(1, (targetPitchFreq - 80) / 420));
+    this.smoothedVol += (targetVol - this.smoothedVol) * 0.15;
+    this.smoothedPitch += (normPitch - this.smoothedPitch) * 0.12;
+    this.smoothedPitchFreq += (targetPitchFreq - this.smoothedPitchFreq) * 0.12;
 
     const dummyFreq = new Uint8Array(256);
     const dummyTime = new Uint8Array(256);
 
     for (let i = 0; i < 256; i++) {
       const x = i / 256;
-      // Synthesized harmonic spectrum
       const h1 = Math.sin(x * 12 + time * speed) * 0.5 + 0.5;
       const h2 = Math.sin(x * 28 - time * speed * 1.3) * 0.3 + 0.3;
       const h3 = Math.sin(x * 64 + time * speed * 2) * 0.2 + 0.2;
@@ -174,7 +321,6 @@ export class AudioEngine {
       const val = Math.min(255, Math.max(0, Math.floor((h1 + h2 + h3 + noise) * this.smoothedVol * 255)));
       dummyFreq[i] = val;
       
-      // Synthesized time domain wave centered around 128
       const waveVal = 128 + Math.floor(Math.sin(x * Math.PI * 8 + time * speed * 3) * this.smoothedVol * 110);
       dummyTime[i] = Math.min(255, Math.max(0, waveVal));
     }
@@ -184,6 +330,8 @@ export class AudioEngine {
       bass: Math.min(1, this.smoothedVol * 1.4),
       mid: Math.min(1, this.smoothedVol * 1.1),
       treble: Math.min(1, this.smoothedVol * 0.8),
+      pitch: this.smoothedPitch,
+      pitchFrequency: this.smoothedPitchFreq,
       rawFrequencies: dummyFreq,
       timeDomainData: dummyTime,
       smoothedVolume: this.smoothedVol,
@@ -200,7 +348,6 @@ export class AudioEngine {
       const now = ctx.currentTime;
 
       if (type === 'listen_start') {
-        // Sci-Fi ascending harmonic chime
         const osc1 = ctx.createOscillator();
         const osc2 = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -226,7 +373,6 @@ export class AudioEngine {
         osc1.stop(now + 0.35);
         osc2.stop(now + 0.35);
       } else if (type === 'listen_stop') {
-        // Descending soft close tone
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.type = 'sine';
@@ -241,12 +387,11 @@ export class AudioEngine {
         osc.start(now);
         osc.stop(now + 0.25);
       } else if (type === 'response') {
-        // Futuristic double bell chime
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(587.33, now); // D5
-        osc.frequency.setValueAtTime(880, now + 0.08); // A5
+        osc.frequency.setValueAtTime(587.33, now);
+        osc.frequency.setValueAtTime(880, now + 0.08);
 
         gain.gain.setValueAtTime(0.001, now);
         gain.gain.linearRampToValueAtTime(0.09, now + 0.02);
@@ -257,7 +402,6 @@ export class AudioEngine {
         osc.start(now);
         osc.stop(now + 0.4);
       } else if (type === 'click') {
-        // Subtle haptic acoustic tick
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.type = 'sine';
@@ -273,7 +417,7 @@ export class AudioEngine {
         osc.stop(now + 0.05);
       }
     } catch {
-      // Ignore audio synthesis errors on locked browsers
+      // Ignored
     }
   }
 }

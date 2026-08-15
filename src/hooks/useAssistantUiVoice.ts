@@ -4,6 +4,7 @@ import type { AssistantState } from '../types';
 import { ariaRealtimeVoiceAdapter } from '../lib/ariaVoiceAdapter';
 import { audioEngineInstance } from '../lib/audioEngine';
 import { speechServiceInstance } from '../lib/speechService';
+import { ttsClient } from '../lib/ttsClient';
 
 export function useAssistantUiVoice() {
   const [session, setSession] = useState<RealtimeVoiceAdapter.Session | null>(null);
@@ -25,9 +26,9 @@ export function useAssistantUiVoice() {
     setSession(activeSession);
     setState('listening');
 
-    // Subscribe to mode changes (listening vs speaking)
+    // Subscribe to mode changes (listening, processing, speaking, idle)
     activeSession.onModeChange((mode) => {
-      setState(mode === 'listening' ? 'listening' : 'speaking');
+      setState(mode as unknown as AssistantState);
     });
 
     // Subscribe to volume changes
@@ -60,7 +61,7 @@ export function useAssistantUiVoice() {
     }
     audioEngineInstance.stopMicrophone();
     speechServiceInstance.stopListening();
-    speechServiceInstance.stopSpeaking();
+    ttsClient.stop();
     setState('idle');
   }, [session]);
 
@@ -72,6 +73,10 @@ export function useAssistantUiVoice() {
     };
   }, [session]);
 
+  const submitSpokenQuery = useCallback(() => {
+    speechServiceInstance.stopAndSubmit();
+  }, []);
+
   return {
     state,
     volume,
@@ -80,6 +85,7 @@ export function useAssistantUiVoice() {
     isSessionActive: session !== null,
     startVoiceSession,
     stopVoiceSession,
+    submitSpokenQuery,
     setTranscript,
     setState,
     setAssistantReply,

@@ -1,8 +1,4 @@
-// Web Speech API interface definitions
-// Used for:
-//   - Speech-to-text (STT) input: startListening() transcribes user speech to text.
-//   - Fallback TTS output: speak() uses the browser's SpeechSynthesis when the
-//     F5-TTS backend is unavailable or the user selects "Browser TTS" in settings.
+// Web Speech API interface definitions for Speech-to-Text (STT) transcription
 interface SpeechRecognitionEventLike {
   results: {
     [index: number]: {
@@ -36,9 +32,16 @@ interface SpeechRecognitionInstance {
 export class SpeechService {
   private recognition: SpeechRecognitionInstance | null = null;
   private isListening = false;
+  private isFlushingOnRelease = false;
+  private hasNetworkError = false;
+
   private onTranscriptUpdate: ((transcript: string, isFinal: boolean) => void) | null = null;
+  private onSilenceAutoSubmit: ((transcript: string) => void) | null = null;
   private onListeningEnd: (() => void) | null = null;
-  private speechSynthesisEnabled = true;
+  
+  private silenceTimer: number | null = null;
+  private currentText = '';
+  private silencePauseMs = 2500; // 2.5-second silence auto-submit threshold
 
   constructor() {
     this.initRecognition();
@@ -52,47 +55,136 @@ export class SpeechService {
       webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
     };
 
-    const SpeechRecognitionClass = windowWithSpeech.SpeechRecognition || windowWithSpeech.webkitSpeechRecognition;
+    const SpeechRecognitionClass =
+      windowWithSpeech.SpeechRecognition || windowWithSpeech.webkitSpeechRecognition;
 
     if (SpeechRecognitionClass) {
       try {
         this.recognition = new SpeechRecognitionClass();
-        this.recognition.continuous = false;
+        this.recognition.continuous = true;
         this.recognition.interimResults = true;
         this.recognition.lang = 'en-US';
 
         this.recognition.onresult = (event: SpeechRecognitionEventLike) => {
           let interimTranscript = '';
           let finalTranscript = '';
+          let hasFinalChunk = false;
 
           for (let i = 0; i < event.results.length; i++) {
             const res = event.results[i];
             if (res.isFinal) {
-              finalTranscript += res[0].transcript;
+              finalTranscript += res[0].transcript + ' ';
+              hasFinalChunk = true;
             } else {
               interimTranscript += res[0].transcript;
             }
           }
 
-          const currentText = finalTranscript || interimTranscript;
-          if (this.onTranscriptUpdate && currentText) {
-            this.onTranscriptUpdate(currentText, Boolean(finalTranscript));
+          const newText = (finalTranscript + interimTranscript).trim();
+          if (newText) {
+            this.currentText = newText;
+
+            if (this.onTranscriptUpdate) {
+              this.onTranscriptUpdate(newText, hasFinalChunk);
+            }
+
+            // Immediately auto-submit if Web Speech API returns isFinal chunk or start 2.5s silence countdown
+            if (hasFinalChunk && finalTranscript.trim().length > 3 && !this.isFlushingOnRelease) {
+              this.triggerAutoSubmit(finalTranscript.trim());
+            } else {
+              this.resetSilenceTimer();
+            }
           }
         };
 
         this.recognition.onerror = (event: SpeechRecognitionErrorLike) => {
-          console.warn('Speech recognition status/error:', event.error);
+          if (event.error === 'network') {
+            this.hasNetworkError = true;
+            console.warn('[SpeechService] Browser Speech API network connection unavailable (speech.googleapis.com). Use text input modal or check network.');
+          } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
+            console.warn('[SpeechService] Recognition error:', event.error);
+          }
         };
 
         this.recognition.onend = () => {
-          this.isListening = false;
-          if (this.onListeningEnd) {
-            this.onListeningEnd();
+          const textToSubmit = this.currentText.trim();
+          if ((this.isListening || this.isFlushingOnRelease) && textToSubmit) {
+            this.isFlushingOnRelease = false;
+            this.triggerAutoSubmit(textToSubmit);
+          } else if (this.isListening && this.recognition && !this.hasNetworkError) {
+            try {
+              this.recognition.start();
+            } catch {
+              // Ignore collision
+            }
+          } else {
+            this.isListening = false;
+            this.isFlushingOnRelease = false;
+            this.clearSilenceTimer();
+            if (this.onListeningEnd) {
+              this.onListeningEnd();
+            }
           }
         };
       } catch (err) {
-        console.warn('SpeechRecognition initialization error:', err);
+        console.warn('[SpeechService] Initialization error:', err);
       }
+    }
+  }
+
+  private triggerAutoSubmit(textToSubmit: string) {
+    if (!textToSubmit || !this.onSilenceAutoSubmit) return;
+    this.clearSilenceTimer();
+    const callback = this.onSilenceAutoSubmit;
+    this.currentText = '';
+    this.isListening = false;
+    this.isFlushingOnRelease = false;
+    if (this.recognition) {
+      try {
+        this.recognition.stop();
+      } catch {
+        // Ignored
+      }
+    }
+    callback(textToSubmit);
+  }
+
+  public stopAndSubmit() {
+    const textToSubmit = this.currentText.trim();
+    this.clearSilenceTimer();
+
+    if (textToSubmit && this.onSilenceAutoSubmit) {
+      this.triggerAutoSubmit(textToSubmit);
+    } else {
+      // Force recognition stop so onend fires and flushes any pending audio buffer into text
+      this.isFlushingOnRelease = true;
+      if (this.recognition) {
+        try {
+          this.recognition.stop();
+        } catch {
+          // Ignored
+        }
+      }
+    }
+  }
+
+  private resetSilenceTimer() {
+    this.clearSilenceTimer();
+
+    if (!this.currentText.trim()) return;
+
+    // Start 2.5-second countdown after speech pauses
+    this.silenceTimer = window.setTimeout(() => {
+      if (this.currentText.trim()) {
+        this.triggerAutoSubmit(this.currentText.trim());
+      }
+    }, this.silencePauseMs);
+  }
+
+  private clearSilenceTimer() {
+    if (this.silenceTimer !== null) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
     }
   }
 
@@ -100,12 +192,22 @@ export class SpeechService {
     return this.recognition !== null;
   }
 
+  public setSilencePauseMs(ms: number) {
+    this.silencePauseMs = ms;
+  }
+
   public startListening(
     onUpdate: (transcript: string, isFinal: boolean) => void,
+    onAutoSubmit: (transcript: string) => void,
     onEnd: () => void
   ): boolean {
     this.onTranscriptUpdate = onUpdate;
+    this.onSilenceAutoSubmit = onAutoSubmit;
     this.onListeningEnd = onEnd;
+    this.currentText = '';
+    this.hasNetworkError = false;
+    this.isFlushingOnRelease = false;
+    this.clearSilenceTimer();
 
     if (this.recognition) {
       try {
@@ -113,7 +215,7 @@ export class SpeechService {
         this.isListening = true;
         return true;
       } catch (e) {
-        console.warn('Error starting speech recognition:', e);
+        console.warn('[SpeechService] Error starting recognition:', e);
         return false;
       }
     }
@@ -121,77 +223,16 @@ export class SpeechService {
   }
 
   public stopListening() {
-    if (this.recognition && this.isListening) {
+    this.isListening = false;
+    this.isFlushingOnRelease = false;
+    this.clearSilenceTimer();
+    this.currentText = '';
+    if (this.recognition) {
       try {
         this.recognition.stop();
       } catch {
         // Ignored
       }
-      this.isListening = false;
-    }
-  }
-
-  public setSpeechSynthesis(enabled: boolean) {
-    this.speechSynthesisEnabled = enabled;
-  }
-
-  public speak(text: string, onStart?: () => void, onEnd?: () => void): void {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      if (onEnd) setTimeout(onEnd, 2000);
-      return;
-    }
-
-    if (!this.speechSynthesisEnabled) {
-      if (onStart) onStart();
-      // Simulate speaking duration based on word count
-      const durationMs = Math.max(1500, (text.split(' ').length / 3) * 1000);
-      setTimeout(() => {
-        if (onEnd) onEnd();
-      }, durationMs);
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.02;
-    utterance.pitch = 1.05;
-
-    // Pick a smooth voice if available
-    const voices = window.speechSynthesis.getVoices();
-    const preferredVoice = voices.find(
-      (v) =>
-        (v.name.includes('Samantha') ||
-          v.name.includes('Siri') ||
-          v.name.includes('Google UK English Female') ||
-          v.name.includes('Natural') ||
-          v.name.includes('Zira') ||
-          v.name.includes('Victoria')) &&
-        v.lang.startsWith('en')
-    ) || voices.find((v) => v.lang.startsWith('en'));
-
-    if (preferredVoice) {
-      utterance.voice = preferredVoice;
-    }
-
-    utterance.onstart = () => {
-      if (onStart) onStart();
-    };
-
-    utterance.onend = () => {
-      if (onEnd) onEnd();
-    };
-
-    utterance.onerror = () => {
-      if (onEnd) onEnd();
-    };
-
-    window.speechSynthesis.speak(utterance);
-  }
-
-  public stopSpeaking() {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
     }
   }
 }

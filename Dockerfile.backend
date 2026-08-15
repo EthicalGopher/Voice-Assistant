@@ -1,0 +1,34 @@
+FROM python:3.11-slim
+
+# Install system dependencies (ffmpeg, libsndfile1, git, curl, build-essential)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsndfile1 \
+    git \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy requirements and install dependencies
+COPY backend/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend Python application code
+COPY backend ./backend
+
+# Environment variables
+ENV PORT=8000
+ENV HOST=0.0.0.0
+ENV PYTHONPATH=/app/backend
+ENV OLLAMA_HOST=http://ollama:11434
+ENV OLLAMA_MODEL=llama3.2
+
+# Set working directory to backend package
+WORKDIR /app/backend
+
+EXPOSE 8000
+
+# Start FastAPI server on server:app
+CMD ["python", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]

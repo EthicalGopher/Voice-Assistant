@@ -1,7 +1,9 @@
-import { X, Palette, Volume2, Sparkles, User, Sliders, Speaker, Mic } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, Palette, Volume2, Sparkles, User, Sliders, Mic, Bot, RefreshCw, CheckCircle2, AlertCircle, Globe } from 'lucide-react';
 import type { AssistantSettings, ColorThemeKey } from '../types';
 import { COLOR_THEMES } from '../lib/colorThemes';
 import { VoiceReferenceCapture } from './VoiceReferenceCapture';
+import { ollamaClient, type OllamaStatus } from '../lib/ollamaClient';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -18,6 +20,33 @@ export function SettingsModal({
   onClose,
   onUpdateSettings,
 }: SettingsModalProps) {
+  const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
+  const [loadingStatus, setLoadingStatus] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (isOpen) {
+      ollamaClient.getStatus().then((status) => {
+        if (active) {
+          setOllamaStatus(status);
+        }
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [isOpen]);
+
+  const handleManualCheck = async () => {
+    setLoadingStatus(true);
+    try {
+      const status = await ollamaClient.getStatus();
+      setOllamaStatus(status);
+    } finally {
+      setLoadingStatus(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   const themes = Object.values(COLOR_THEMES);
@@ -60,6 +89,95 @@ export function SettingsModal({
               onChange={(e) => onUpdateSettings({ userName: e.target.value })}
               className="w-full py-2.5 px-3.5 text-sm bg-white/5 rounded-lg border border-white/15 focus:outline-none focus:border-cyan-400 text-white font-jakarta"
             />
+          </div>
+
+          {/* Backend & Ngrok Tunnel URL */}
+          <div className="space-y-2 pt-2 border-t border-white/10">
+            <label className="flex items-center gap-2 text-xs font-mono tracking-wider text-slate-400 uppercase">
+              <Globe className="w-3.5 h-3.5 text-cyan-400" />
+              Backend & Ngrok Tunnel URL
+            </label>
+            <input
+              type="text"
+              value={settings.customBackendUrl || ''}
+              onChange={(e) => onUpdateSettings({ customBackendUrl: e.target.value })}
+              placeholder="e.g. https://xxxx.ngrok-free.app or http://localhost:8000"
+              className="w-full py-2.5 px-3.5 text-sm bg-white/5 rounded-lg border border-white/15 focus:outline-none focus:border-cyan-400 text-white font-mono placeholder:text-slate-500"
+            />
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Paste your live <code className="px-1 py-0.5 rounded bg-white/10 text-cyan-300">ngrok http 8000</code> tunnel URL to connect a hosted frontend to your local GPU backend & Ollama!
+            </p>
+          </div>
+
+          {/* Ollama AI Model Settings */}
+          <div className="space-y-3 pt-2 border-t border-white/10">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-xs font-mono tracking-wider text-slate-400 uppercase">
+                <Bot className="w-3.5 h-3.5 text-cyan-400" />
+                Ollama AI Engine
+              </label>
+              <button
+                onClick={handleManualCheck}
+                disabled={loadingStatus}
+                className="flex items-center gap-1 text-[11px] font-mono text-slate-400 hover:text-cyan-300 transition-colors"
+                title="Refresh Ollama status"
+              >
+                <RefreshCw className={`w-3 h-3 ${loadingStatus ? 'animate-spin' : ''}`} />
+                Check Status
+              </button>
+            </div>
+
+            {/* Status indicator pill */}
+            <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10">
+              <div className="flex items-center gap-2">
+                {ollamaStatus?.online ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-amber-400" />
+                )}
+                <span className="text-xs text-slate-300">
+                  {ollamaStatus?.online ? 'Ollama Online' : 'Ollama Unreachable'}
+                </span>
+              </div>
+              <span className="text-[11px] font-mono text-slate-400">
+                {ollamaStatus?.url || 'http://localhost:11434'}
+              </span>
+            </div>
+
+            {/* Model input / selector */}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5 font-mono">
+                Active Ollama Model:
+              </label>
+              {ollamaStatus?.online && ollamaStatus.models.length > 0 ? (
+                <select
+                  value={settings.ollamaModel}
+                  onChange={(e) => onUpdateSettings({ ollamaModel: e.target.value })}
+                  className="w-full py-2.5 px-3.5 text-sm bg-white/5 rounded-lg border border-white/15 focus:outline-none focus:border-cyan-400 text-white font-mono"
+                >
+                  {ollamaStatus.models.map((m) => (
+                    <option key={m} value={m} className="bg-slate-900 text-white">
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={settings.ollamaModel}
+                  onChange={(e) => onUpdateSettings({ ollamaModel: e.target.value })}
+                  placeholder="e.g. llama3.2, mistral, phi3"
+                  className="w-full py-2.5 px-3.5 text-sm bg-white/5 rounded-lg border border-white/15 focus:outline-none focus:border-cyan-400 text-white font-mono"
+                />
+              )}
+            </div>
+
+            {!ollamaStatus?.online && (
+              <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                Run <code className="px-1 py-0.5 rounded bg-white/10 text-amber-200">ollama serve</code> and{' '}
+                <code className="px-1 py-0.5 rounded bg-white/10 text-amber-200">ollama pull llama3.2</code> in your terminal to enable local AI responses.
+              </p>
+            )}
           </div>
 
           {/* Color Themes */}
@@ -158,7 +276,7 @@ export function SettingsModal({
             </div>
 
             <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10">
-              <span className="text-xs text-slate-300">Aria Speech Synthesis Voice</span>
+              <span className="text-xs text-slate-300">F5-TTS Voice Output</span>
               <input
                 type="checkbox"
                 checked={settings.speechSynthesis}
@@ -168,62 +286,19 @@ export function SettingsModal({
             </div>
           </div>
 
-          {/* TTS Engine Selector */}
-          <div className="space-y-3 pt-2 border-t border-white/10">
-            <label className="flex items-center gap-2 text-xs font-mono tracking-wider text-slate-400 uppercase">
-              <Speaker className="w-3.5 h-3.5 text-cyan-400" />
-              Speech Output Engine
-            </label>
-
-            <div className="flex gap-2">
-              <button
-                onClick={() => onUpdateSettings({ ttsProvider: 'f5tts' })}
-                disabled={!backendAvailable}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                  settings.ttsProvider === 'f5tts'
-                    ? 'bg-cyan-500/20 border border-cyan-400 text-cyan-200 shadow-lg shadow-cyan-500/20'
-                    : 'bg-white/5 border border-white/10 text-slate-400 hover:text-white disabled:opacity-40'
-                }`}
-              >
-                <Speaker className="w-4 h-4" />
-                F5-TTS (Voice Clone)
-              </button>
-              <button
-                onClick={() => onUpdateSettings({ ttsProvider: 'webspeech' })}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                  settings.ttsProvider === 'webspeech'
-                    ? 'bg-cyan-500/20 border border-cyan-400 text-cyan-200 shadow-lg shadow-cyan-500/20'
-                    : 'bg-white/5 border border-white/10 text-slate-400 hover:text-white'
-                }`}
-              >
-                <Volume2 className="w-4 h-4" />
-                Browser TTS
-              </button>
-            </div>
-
-            {!backendAvailable && (
-              <p className="text-xs text-rose-300">
-                F5-TTS backend unreachable — using Browser TTS fallback.
-                Start the backend (cd backend && uvicorn server:app --reload) to enable voice cloning.
-              </p>
-            )}
-          </div>
-
-          {/* Voice Reference */}
+          {/* Voice Reference Capture for F5-TTS */}
           <div className="space-y-3 pt-2 border-t border-white/10">
             <label className="flex items-center gap-2 text-xs font-mono tracking-wider text-slate-400 uppercase">
               <Mic className="w-3.5 h-3.5 text-purple-400" />
-              Reference Voice Sample
+              F5-TTS Voice Cloning
             </label>
 
-            {settings.ttsProvider === 'f5tts' && (
-              <VoiceReferenceCapture
-                reference={settings.referenceVoice}
-                onReferenceChange={(ref) => onUpdateSettings({ referenceVoice: ref })}
-                theme={COLOR_THEMES[settings.theme]}
-                backendAvailable={backendAvailable}
-              />
-            )}
+            <VoiceReferenceCapture
+              reference={settings.referenceVoice}
+              onReferenceChange={(ref) => onUpdateSettings({ referenceVoice: ref })}
+              theme={COLOR_THEMES[settings.theme]}
+              backendAvailable={backendAvailable}
+            />
           </div>
         </div>
       </div>

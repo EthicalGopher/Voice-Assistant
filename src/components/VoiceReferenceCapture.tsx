@@ -14,6 +14,22 @@ interface VoiceReferenceCaptureProps {
 type ActiveTab = 'upload' | 'record';
 type RecordState = 'idle' | 'requesting' | 'recording' | 'preview';
 
+function formatErrorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    try {
+      const match = err.message.match(/\{.*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        if (parsed.detail) return parsed.detail;
+      }
+    } catch {
+      // ignore
+    }
+    return err.message;
+  }
+  return String(err);
+}
+
 export function VoiceReferenceCapture({
   reference,
   onReferenceChange,
@@ -60,7 +76,7 @@ export function VoiceReferenceCapture({
       setShowReplace(false);
       e.target.value = '';
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : String(err));
+      setUploadError(formatErrorMessage(err));
     } finally {
       setUploading(false);
     }
@@ -124,7 +140,7 @@ export function VoiceReferenceCapture({
       setPreviewUrl(null);
       setRecordState('idle');
     } catch (err) {
-      setRecordError(err instanceof Error ? err.message : String(err));
+      setRecordError(formatErrorMessage(err));
       setRecordState('preview');
     }
   };
@@ -276,20 +292,29 @@ export function VoiceReferenceCapture({
 
       {activeTab === 'record' && (
         <div className="space-y-3">
+          {/* Always display the fixed script so the user can read it continuously while recording */}
+          <div
+            className="p-3.5 rounded-xl bg-white/5 border border-white/15 transition-all"
+            style={{
+              borderLeftWidth: '3px',
+              borderLeftColor: recordState === 'recording' ? '#f43f5e' : theme.primary,
+            }}
+          >
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-xs text-slate-400 font-mono">
+                {recordState === 'recording' ? '🔴 Read this script aloud now:' : 'Read this script clearly (3+ seconds):'}
+              </p>
+              {recordState === 'recording' && (
+                <span className="text-[11px] font-mono text-rose-400 animate-pulse">RECORDING</span>
+              )}
+            </div>
+            <p className="text-sm text-slate-100 font-jakarta leading-relaxed">
+              {FIXED_REF_SCRIPT}
+            </p>
+          </div>
+
           {recordState === 'idle' || recordState === 'requesting' ? (
             <>
-              <div
-                className="p-3 rounded-xl bg-white/5 border border-white/15"
-                style={{ borderLeftColor: theme.primary }}
-              >
-                <p className="text-xs text-slate-400 mb-2 font-mono">
-                  Read this script clearly (3+ seconds):
-                </p>
-                <p className="text-sm text-slate-200 font-jakarta">
-                  {FIXED_REF_SCRIPT}
-                </p>
-              </div>
-
               <button
                 onClick={startRecording}
                 disabled={recordState === 'requesting' || !backendAvailable}
@@ -302,7 +327,7 @@ export function VoiceReferenceCapture({
                   </>
                 ) : (
                   <>
-                    <Mic className="w-4 h-4" />
+                    <Mic className="w-4 h-4 text-cyan-400" />
                     Start Recording
                   </>
                 )}
@@ -314,16 +339,11 @@ export function VoiceReferenceCapture({
             </>
           ) : recordState === 'recording' ? (
             <div className="space-y-3">
-              <div className="flex items-center justify-center gap-2 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30">
-                <span className="w-3 h-3 rounded-full bg-rose-400 animate-pulse" />
-                <span className="text-sm text-rose-300 font-mono">RECORDING</span>
-              </div>
-
               <button
                 onClick={stopRecording}
-                className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 transition-all"
+                className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 transition-all active:scale-98"
               >
-                <Square className="w-4 h-4" />
+                <Square className="w-4 h-4 fill-current text-rose-400" />
                 Stop Recording
               </button>
             </div>
@@ -361,7 +381,7 @@ export function VoiceReferenceCapture({
                 <button
                   onClick={confirmRecording}
                   disabled={uploading}
-                  className="flex-1 flex items-center justify-center gap-2 p-2.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 transition-all disabled:opacity-50"
+                  className="flex-1 flex items-center justify-center gap-2 p-2.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 border border-cyan-400/40 transition-all disabled:opacity-50"
                 >
                   {uploading ? (
                     <span className="w-4 h-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />

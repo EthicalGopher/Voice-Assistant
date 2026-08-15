@@ -10,14 +10,21 @@ interface ParticleFieldProps {
   count?: number;
 }
 
+function createSeededRandom(seed: number) {
+  let s = seed;
+  return () => {
+    s = (s * 16807) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+
 export function ParticleField({ state, theme, count = 1200 }: ParticleFieldProps) {
   const pointsRef = useRef<THREE.Points>(null);
 
-  // Generate initial particle positions, sizes, and orbital radii
-  const [positions, _scales, _randoms, colors] = useMemo(() => {
+  // Generate initial particle positions and colors
+  const { positions, colors } = useMemo(() => {
+    const random = createSeededRandom(42);
     const pos = new Float32Array(count * 3);
-    const sc = new Float32Array(count);
-    const rnd = new Float32Array(count * 3);
     const col = new Float32Array(count * 3);
 
     const colorPrimary = new THREE.Color(theme.primary);
@@ -26,29 +33,23 @@ export function ParticleField({ state, theme, count = 1200 }: ParticleFieldProps
 
     for (let i = 0; i < count; i++) {
       // Orbital distribution around the center sphere
-      const radius = 1.6 + Math.random() * 4.5;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
+      const radius = 1.6 + random() * 4.5;
+      const theta = random() * Math.PI * 2;
+      const phi = Math.acos(2 * random() - 1);
 
       pos[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
       pos[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
       pos[i * 3 + 2] = radius * Math.cos(phi);
 
-      sc[i] = Math.random() * 0.05 + 0.02;
-
-      rnd[i * 3] = Math.random() * 2 - 1;
-      rnd[i * 3 + 1] = Math.random() * 2 - 1;
-      rnd[i * 3 + 2] = Math.random() * 2 - 1;
-
       // Mix palette
-      const r = Math.random();
+      const r = random();
       const chosenColor = r < 0.5 ? colorPrimary : r < 0.85 ? colorSecondary : colorAccent;
       col[i * 3] = chosenColor.r;
       col[i * 3 + 1] = chosenColor.g;
       col[i * 3 + 2] = chosenColor.b;
     }
 
-    return [pos, sc, rnd, col];
+    return { positions: pos, colors: col };
   }, [count, theme]);
 
   useFrame((stateCtx) => {
